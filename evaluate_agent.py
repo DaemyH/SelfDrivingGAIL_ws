@@ -3,6 +3,7 @@ import os
 from env.env import CarlaEnv
 from env import routes
 from algo.ppo import PPOAgent
+from algo.nmpc import NMPCConfig, NMPCController, PIDController
 
 import numpy as np
 import random
@@ -10,6 +11,7 @@ import argparse
 from distutils.util import strtobool
 import matplotlib.pyplot as plt
 import torch
+import math
 
 
 # command-line arguments
@@ -49,6 +51,11 @@ if __name__ == '__main__':
     agent = PPOAgent(args.agent_name, 3, 0, env, device, 0, None, branched=args.branched).float()
     print('.... loading models ....')
     agent.load_models()
+
+    # NMPC controller setup
+    nmpc_config = NMPCConfig(dt=env.dt)
+    nmpc_controller = NMPCController(nmpc_config)
+    pid_fallback = PIDController(0.6, 0.05, 0.05, (nmpc_config.max_decel, nmpc_config.max_accel))
 
     # dataset
     if not args.on_test_set:
@@ -107,6 +114,10 @@ if __name__ == '__main__':
                 os.makedirs(os.path.join(saliency_dir, 'left'))
 
         step_number = -1
+        route_errors = []
+        control_smoothing = []
+        safety_events = []
+        previous_control = None
         while not done:
             step_number += 1
             obs = torch.tensor(obs, dtype=torch.float, requires_grad=obs_requires_grad).to(device)
@@ -135,11 +146,42 @@ if __name__ == '__main__':
                 plt.imsave(os.path.join(saliency_dir, 'right', f'obs_{step_number:03}.png'), slc, cmap=plt.cm.hot)
 
             # perform action
-            action = action.clone().detach()
-            next_obs, command, speed, _, done, info = env.step(action.view(-1).cpu().numpy())
+            base_action = action.clone().detach().view(-1).cpu().numpy()
+
+            vehicle_state = env.get_vehicle_state()
+            waypoints = env.get_route_waypoints(max_points=nmpc_config.horizon)
+            policy_ref = nmpc_controller.convert_policy_output(base_action, vehicle_state.speed)
+            nmpc_plan = nmpc_controller.plan(vehicle_state, waypoints, policy_ref)
+
+            if nmpc_plan.success:
+                applied_action = nmpc_controller.to_control_action(nmpc_plan)
+            elif nmpc_plan.status == 'no_waypoints':
+                applied_action = base_action
+            else:
+                accel_cmd = pid_fallback.compute(policy_ref.target_speed - vehicle_state.speed, env.dt)
+                applied_action = np.array([
+                    np.clip(accel_cmd, 0.0, nmpc_config.max_accel) / nmpc_config.max_accel,
+                    policy_ref.nominal_steer / nmpc_config.max_steer,
+                    np.clip(-accel_cmd, 0.0, -nmpc_config.max_decel) / -nmpc_config.max_decel,
+                ], dtype=np.float32)
+                safety_events.append(f"fallback@{step_number}:{nmpc_plan.status}")
+
+            if previous_control is not None:
+                control_smoothing.append(float(np.linalg.norm(applied_action - previous_control)))
+            previous_control = applied_action
+
+            if nmpc_plan.tracking_errors:
+                route_errors.append(nmpc_plan.tracking_errors[0])
+            elif len(waypoints) > 0:
+                wpx, wpy, _ = waypoints[0]
+                route_errors.append(math.hypot(wpx - vehicle_state.x, wpy - vehicle_state.y))
+
+            next_obs, command, speed, _, done, info = env.step(applied_action)
             obs = next_obs
 
             if done:
-                print(f'route {i:02}: {info}')
+                mean_error = np.mean(route_errors) if route_errors else 0.0
+                mean_smoothing = np.mean(control_smoothing) if control_smoothing else 0.0
+                print(f'route {i:02}: {info} | tracking {mean_error:.2f}m | control Δ {mean_smoothing:.3f} | fallbacks {len(safety_events)}')
 
     env.close()
