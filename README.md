@@ -85,6 +85,15 @@ What's interesting is that the model has not seen this type of error in the expe
 ## How to Run
 A guide to set up the training environment and run the codes, along with the trained models will be added soon...
 
+## NMPC controller code locations
+
+If you pulled the branch that contains the NMPC evaluation work, you should see the following files and imports in your local checkout:
+
+- `algo/nmpc.py`: lightweight NMPC utilities (kinematic bicycle dynamics, constraints, PID fallback, waypoint helpers).
+- `evaluate_agent.py`: imports `NMPCConfig`, `NMPCController`, and `PIDController` from `algo.nmpc` and wires them into evaluation.
+
+If those files are missing after a fresh `git clone`, make sure you are on the updated branch (e.g., `work` or the PR branch) by running `git status` and `git branch --show-current`.
+
 ## Reference Papers
 - <a id="1">[1]</a> [Generative Adversarial Imitation Learning, NIPS (2016)](https://arxiv.org/abs/1606.03476)
 - <a id="2">[2]</a> [End to End Learning for Self-Driving Cars, arXiv (2017)](https://arxiv.org/abs/1604.07316)
