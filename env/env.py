@@ -8,6 +8,8 @@ import queue
 import numpy as np
 import matplotlib.pyplot as plt
 
+from algo.nmpc import VehicleState, extract_waypoints_from_queue
+
 import carla
 from carla_agents.navigation.basic_agent import BasicAgent
 from carla_agents.navigation.local_planner import RoadOption
@@ -23,6 +25,7 @@ class CarlaEnv:
         self.evaluate = evaluate
         self.eval_image_w = eval_image_w
         self.eval_image_h = eval_image_h
+        self.dt = 1 / fps
 
         # episode variables
         self.max_episode_steps = 150 if not evaluate else 250
@@ -306,6 +309,25 @@ class CarlaEnv:
         # print(self.obs_number, command, road_dist)
 
         return obs, command, speed, reward, done, info
+
+    def get_vehicle_state(self):
+        """Return current vehicle state in NMPC-friendly format."""
+
+        transform = self.vehicle.get_transform()
+        velocity = self.vehicle.get_velocity()
+        speed = math.sqrt(velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2)
+        yaw = math.radians(float(transform.rotation.yaw))
+        location = transform.location
+        return VehicleState(x=float(location.x), y=float(location.y), yaw=yaw, speed=speed)
+
+    def get_route_waypoints(self, max_points=20):
+        """Expose upcoming global planner waypoints for NMPC reference."""
+
+        if self.agent is None:
+            return []
+        local_planner = self.agent.get_local_planner()
+        queue = getattr(local_planner, 'waypoints_queue', [])
+        return extract_waypoints_from_queue(queue, max_points)
 
     def destroy_sensors(self):
         sensors = [*self.cameras, self.eval_camera, self.collision_sensor, self.lane_invasion_sensor]
