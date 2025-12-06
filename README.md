@@ -82,8 +82,31 @@ https://user-images.githubusercontent.com/36497794/229385027-5c74754b-a69c-4f39-
 <br>
 What's interesting is that the model has not seen this type of error in the expert dataset or in the training environment. But due to the inherent exploration present in the stochastic policy of PPO, and also, the explicit reward explained before, the model has learned by itself to handle such errors.
 
-## How to Run
-A guide to set up the training environment and run the codes, along with the trained models will be added soon...
+## How to Run (step by step)
+1. **환경 준비**
+   - CARLA 시뮬레이터 서버를 실행합니다(`--host 127.0.0.1 --port 2000`).
+   - Python 의존성 설치: `pip install -r requirements.txt` (필요 시 CARLA egg 경로를 `PYTHONPATH`에 추가).
+2. **전문가 데이터 수집**
+   - CARLA가 켜진 상태에서 `python generate_data.py --num-episodes 4 --record True --autopilot True --no-screen True` 실행.
+   - `expert_data/<timestamp>/` 폴더에 `expert_states.npy`, `expert_commands.npy`, `expert_speeds.npy`, `expert_actions.npy`, `len.txt`가 저장됩니다.
+3. **Behavioral Cloning 사전학습**
+   - `python train_bc.py --seed 1 --learning-rate 3e-4 --branched True --use-cuda True`
+   - 체크포인트는 `models/bc/`에 저장되며 TensorBoard 로그는 `runs/` 폴더에 기록됩니다.
+4. **BC+GAIL 통합 학습**
+   - `python train_bc_gail.py --total_timesteps 150000 --ppo-learning-rate 1e-4 --disc-learning-rate 1e-4 --branched True --use-cuda True`
+   - 5번째 업데이트마다 PPO/Discriminator 가 `models/bc_gail/`에 저장됩니다.
+5. **NMPC 결합 평가**
+   - CARLA 서버를 켠 뒤 `python evaluate_agent.py --agent-name bc_gail --on-test-set True --deterministic True --use-cuda True` 실행.
+   - `algo.nmpc`가 정책 출력을 참조 궤적으로 변환하여 NMPC를 풀이하고, 실패 시 PID fallback을 적용합니다. 실행 로그에 경로 오차·제어 변화량·fallback 횟수가 출력됩니다.
+
+## NMPC controller code locations
+
+If you pulled the branch that contains the NMPC evaluation work, you should see the following files and imports in your local checkout:
+
+- `algo/nmpc.py`: lightweight NMPC utilities (kinematic bicycle dynamics, constraints, PID fallback, waypoint helpers).
+- `evaluate_agent.py`: imports `NMPCConfig`, `NMPCController`, and `PIDController` from `algo.nmpc` and wires them into evaluation.
+
+If those files are missing after a fresh `git clone`, make sure you are on the updated branch (e.g., `work` or the PR branch) by running `git status` and `git branch --show-current`.
 
 ## NMPC controller code locations
 
