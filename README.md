@@ -85,6 +85,74 @@ What's interesting is that the model has not seen this type of error in the expe
 ## How to Run
 A guide to set up the training environment and run the codes, along with the trained models will be added soon...
 
+## NMPC controller code locations
+
+If you pulled the branch that contains the NMPC evaluation work, you should see the following files and imports in your local checkout:
+
+- `algo/nmpc.py`: lightweight NMPC utilities (kinematic bicycle dynamics, constraints, PID fallback, waypoint helpers).
+- `evaluate_agent.py`: imports `NMPCConfig`, `NMPCController`, and `PIDController` from `algo.nmpc` and wires them into evaluation.
+
+If those files are missing after a fresh `git clone`, make sure you are on the updated branch (e.g., `work` or the PR branch) by running `git status` and `git branch --show-current`.
+
+## How to verify the NMPC files locally
+
+If you want to double-check that the NMPC code and the PPO/NMPC wiring are present after cloning, follow the steps below.
+
+1. **Clone the repo**
+   ```bash
+   git clone <REPO_URL>
+   cd SelfDrivingGAIL_ws
+   ```
+2. **Confirm you are on the branch with NMPC support**
+   ```bash
+   git branch --show-current
+   # expected: work (or the branch name that contains the NMPC changes)
+   git status
+   ```
+   If you are on a different branch, switch to the correct one:
+   ```bash
+   git checkout work   # or the branch name shared with you
+   ```
+3. **Verify the NMPC files exist**
+   ```bash
+   ls algo/nmpc.py
+   rg "NMPCController" evaluate_agent.py
+   rg "PIDController" evaluate_agent.py
+   ```
+   You should see `algo/nmpc.py` and NMPC/PID imports in `evaluate_agent.py`.
+4. **Optional: run a quick import check**
+   ```bash
+   python - <<'PY'
+   from algo.nmpc import NMPCConfig, NMPCController, PIDController
+   import evaluate_agent
+   print('NMPC imports OK')
+   PY
+   ```
+   This confirms Python can locate the NMPC helpers and the evaluation script. If this fails, re-check the branch and your Python environment.
+
+## Compare policy-only, PID, and NMPC controllers
+
+To build a clear comparison baseline for your paper, you can run the same trained PPO policy with three different control backends:
+
+- **policy**: raw PPO outputs (throttle/steer/brake) applied directly.
+- **pid**: PPO for lateral steer, PID for longitudinal speed tracking (uses the policy's target speed).
+- **nmpc**: PPO short-horizon reference converted to NMPC, with PID fallback on solver failures.
+
+Use the new `--control-mode` flag in `evaluate_agent.py` to switch among them and log per-route metrics for side-by-side analysis:
+
+```bash
+# policy-only baseline
+python evaluate_agent.py --control-mode policy --results-path logs/policy_only.csv
+
+# policy + PID (speed) baseline
+python evaluate_agent.py --control-mode pid --results-path logs/policy_pid.csv
+
+# policy + NMPC (default)
+python evaluate_agent.py --control-mode nmpc --results-path logs/policy_nmpc.csv
+```
+
+Each CSV will contain per-route tracking error, control smoothing, and fallback counts so you can quantify the benefit of NMPC over the policy-only and PID-assisted baselines.
+
 ## Reference Papers
 - <a id="1">[1]</a> [Generative Adversarial Imitation Learning, NIPS (2016)](https://arxiv.org/abs/1606.03476)
 - <a id="2">[2]</a> [End to End Learning for Self-Driving Cars, arXiv (2017)](https://arxiv.org/abs/1604.07316)
